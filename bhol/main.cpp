@@ -388,7 +388,7 @@ static Screen s;
 
 auto handle_key(int c) {
     switch(c) {
-        case 'p': Context::step = !Context::step; return true;
+        case ' ': Context::step = !Context::step; return true;
         case 's': Context::statistics = !Context::statistics; return true;
         case 'q': Context::quit = true; return true;
         case '<': Context::time_factor -= min(.1, Context::time_factor/2); return true;
