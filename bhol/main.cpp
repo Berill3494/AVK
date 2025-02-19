@@ -5,9 +5,7 @@
 #include <ncurses.h>
 #include <numbers>
 #include <random>
-#include <ranges>
 #include <thread>
-#include <tuple>
 
 using namespace std;
 using namespace chrono_literals;
@@ -232,6 +230,7 @@ struct Particle {
     list<ScreenPosition> history;
 
 
+    // statistical variables only for display purposes
     Vector rv;
     double last_r;
     double last_f;
