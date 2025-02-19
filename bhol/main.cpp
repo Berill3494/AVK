@@ -211,6 +211,10 @@ namespace Context {
     double time_factor = 1;
     // stepped execution or continuous
     bool step = false;
+    // print calculation data
+    bool statistics = false;
+    // signals if the execution shall stop
+    bool quit = false;
 }
 
 struct Particle {
@@ -283,7 +287,6 @@ struct Particle {
             w.put(p.x, p.y, i < berill.length() ? berill[i] : '.');
             ++i;
         }
-        w.put(0, 1, "angle: " + to_string(this->v.angle()) + ", v.angle: " + to_string(this->v.angle()));
         w.bold(true);
 		w.put(sp.x, sp.y, berill[0]);
         w.bold(false);
@@ -385,7 +388,9 @@ static Screen s;
 
 auto handle_key(int c) {
     switch(c) {
-        case 's': Context::step = !Context::step; return true;
+        case 'p': Context::step = !Context::step; return true;
+        case 's': Context::statistics = !Context::statistics; return true;
+        case 'q': Context::quit = true; return true;
         case '<': Context::time_factor -= min(.1, Context::time_factor/2); return true;
         case '>': Context::time_factor += min(.1, Context::time_factor*2); return true;
     }
@@ -406,9 +411,10 @@ int main() {
         ps.push_back({Vector::from_screen({s.xmax-int(r.get(10)), i*2}, Constants::scale), Constants::particle_velocity});
     }
 
-	for(;;) {
+	for(;!Context::quit;) {
         w.clear();
         w.put(0, 0, "resolution: " + to_string(xm) + ":" + to_string(ym)+ ", time factor: " + to_string(Context::time_factor));
+        w.put(0, 1, "control time factor with \"<\" and \">\", play/pause with \"p\", quit with \"q\"");
         bool stat = true;
 		for(auto &p: ps) {
             // do not even calculate dead particles
@@ -417,15 +423,17 @@ int main() {
 			//auto f = b.angle_difference_force(p);
 			auto f = b.newtonian_force(p);
             p.move(f);
-			p.draw(w, stat);
+			p.draw(w, stat && Context::statistics);
             stat = false;
 		}
         b.draw(w);
 		w.refresh();
         auto c = w.key_pressed();
-        if(c || Context::step) {
-            while(handle_key(c.value_or(0)))
-                c = w.wait_for_key();
+        if(c)
+            handle_key(c.value());
+        for(;Context::step;) {
+            c = w.wait_for_key();
+            handle_key(c.value_or(0));
         }
         this_thread::sleep_for(10ms);
     }
