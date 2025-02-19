@@ -364,22 +364,6 @@ struct Blackhole {
         p.fv = towards_blackhole;
         return towards_blackhole;
     }
-/*
-	auto angle_difference_force(Particle &p){
-        // same as above
-        Vector towards_blackhole = difference(this->p, p.p);
-        auto r = towards_blackhole.magnitude();
-        auto F = Constants::G*mass_in_kg()*p.mass/(r*r);
-
-        p.last_f = F;
-
-        auto angle = towards_blackhole.angle();
-        double delta_angle = -F*Constants::c*sin(p.last_r - angle);
-        delta_angle /= std::abs(1.-2.*Constants::G*mass_in_kg()/(r*Constants::c*Constants::c));
-        p.last_r += delta_angle;
-        towards_blackhole.angle(p.last_r + delta_angle);
-        return towards_blackhole;
-    }*/
 };
 
 // Declare it static, so we can exit() and still restore the terminal states
@@ -420,7 +404,6 @@ int main() {
             // do not even calculate dead particles
             if(!p.show)
                 continue;
-			//auto f = b.angle_difference_force(p);
 			auto f = b.newtonian_force(p);
             p.move(f);
 			p.draw(w, stat && Context::statistics);
