@@ -73,9 +73,11 @@ struct Window {
     	wclear(get());
     }
 
-    auto key_pressed() const {
+    auto key_pressed() const -> optional<int> {
         int c = wgetch(get());
-        return (c != ERR);
+        if(c != ERR)
+            return c;
+        return {};
     }
 
     auto wait_for_key() {
@@ -137,6 +139,10 @@ struct Vector {
         this->y = 1;
         this->x = 1/tan(a);
     }
+    // returns if the vector was initialized with 0s
+    auto is_null() const {
+        return (this->x == 0 && this->y == 0);
+    }
     // calculates the distance of two vectors
     auto distance(Vector const& other) {
         return Vector(this->x-other.x, this->y-other.y).magnitude(); 
@@ -167,11 +173,17 @@ struct Vector {
     }
 };
 
+const Vector null_vector{0, 0};
+
 // calculates the difference of two vectors
 auto difference(Vector const& v0, Vector const& v1) {
     Vector v = v0;
     v.sub(v1);
     return v;
+}
+
+auto rad_to_deg(auto r) {
+    return r*180/numbers::pi;
 }
 
 // ---------------------------------------------------------------------- //
@@ -186,14 +198,19 @@ namespace Constants {
     const double blackhole_mass = 4.297E6;
     const double solar_mass = 1.989E30;
 
-    // this determines the frame rate of the movement
-    const double time_factor = 1;
     // scaling of the universe
-    const double scale = 1E-9;
+    const double scale = 1.1E-9;
     // initial direction of the particles
-    const Vector particle_velocity = {-1, 0};
+    const Vector particle_velocity = {-c, 0};
     // how long the trail is for the particles
     const size_t history_size = 10;
+}
+
+namespace Context {
+    // this determines the frame rate of the movement
+    double time_factor = 1;
+    // stepped execution or continuous
+    bool step = false;
 }
 
 struct Particle {
@@ -215,8 +232,12 @@ struct Particle {
     double last_r;
     double last_f;
     Vector last_v;
+    Vector fv;
 
     auto move(Vector const& f) {
+        if(f.is_null()) {
+            this->show = false;
+        }
         ScreenPosition last = p.to_screen(Constants::scale);
         // only store the last position if it is different from the last one stored
         // this ensures that even if the particle ramained in the same position, it will have a trail
@@ -232,20 +253,26 @@ struct Particle {
         this->v.magnitude(Constants::c);
         Vector pv = this->v;
         // scale it to our time frame
-        pv.scale(Constants::time_factor);
+        pv.scale(Context::time_factor);
         // move the particle (add velocity to position)
         rv = pv;
         this->p.add(pv);     
     }
 
-	auto draw(Window &w) {
+	auto draw(Window &w, bool stat) {
         auto sp = this->p.to_screen(Constants::scale);
-        w.put(0,  9, "vlast: " + to_string(last_v.x) + ":" + to_string(last_v.y) + ", mag: " + to_string(last_v.magnitude()));
-        w.put(0, 10, "v: " + to_string(rv.x) + ":" + to_string(rv.y) + ", mag: " + to_string(rv.magnitude()));
-        w.put(0, 11, "p: " + to_string(p.x) + ":" + to_string(p.y) + ", distance: " + to_string(last_r));
-        w.put(0, 12, "d: " + to_string(last_r));
-        w.put(0, 13, "f: " + to_string(last_f));
-        w.put(0, 14, "p: " + to_string(sp.x) + ":" + to_string(sp.y) + ", show: " + to_string(show));
+        if(stat) {
+            w.put(0,  7, "fv: " + to_string(fv.x) + ":" + to_string(fv.y) + ", angle: " + to_string(rad_to_deg(fv.angle())));
+            Vector vv = last_v;
+            vv.add(fv);
+            w.put(0,  8, "fv+vl: " + to_string(vv.x) + ":" + to_string(vv.y) + ", angle: " + to_string(rad_to_deg(vv.angle())));
+            w.put(0,  9, "vlast: " + to_string(last_v.x) + ":" + to_string(last_v.y) + ", angle: " + to_string(rad_to_deg(last_v.angle())));
+            w.put(0, 10, "v: " + to_string(rv.x) + ":" + to_string(rv.y) + ", angle: " + to_string(rad_to_deg(rv.angle())));
+            w.put(0, 11, "p: " + to_string(p.x) + ":" + to_string(p.y) + ", distance: " + to_string(last_r));
+            w.put(0, 12, "d: " + to_string(last_r));
+            w.put(0, 13, "f: " + to_string(last_f));
+            w.put(0, 14, "p: " + to_string(sp.x) + ":" + to_string(sp.y) + ", show: " + to_string(show));
+        }
 
         if(!this->show || !w.is_in(sp))
             return;
@@ -271,6 +298,9 @@ struct Blackhole {
     // r = 2 × G × M/c*c
     const double r = 2*Constants::G*mass*Constants::solar_mass/(Constants::c*Constants::c);
 
+    auto mass_in_kg() const {
+        return this->mass*Constants::solar_mass;
+    }
     auto draw(Window &w) {
         auto sp = this->p.to_screen(Constants::scale);
         if(!w.is_in(sp))
@@ -288,8 +318,12 @@ struct Blackhole {
             exit(-1);
         }
 
-        // simple filled circle raster algorithm, which goes through each
-        // pixed in the bounding box of the circle and fills it, it its inside
+        // calculate the top left corner where the drawing shall start
+        const auto left = sp.x-N/2;
+        const auto top = sp.y-N/2;
+
+        // simple circle raster algorithm, which goes through each
+        // pixed in the bounding box of the circle and fills it, if its inside
         // the circle (distance is smaller than radius)
         for(int i = 0; i < N; i++) {
             for(int j = 0; j < N; j++) {
@@ -297,12 +331,15 @@ struct Blackhole {
                 int y = j-R;
 
                 // Pythagoras to see if the point is inside the triangle to the rim of the circle
-                if (x*x + y*y <= R*R+1)
-                    w.put(sp.x-N/2+i, sp.y-N/2+j, 'o');
+                const auto t = x*x + y*y;
+                // radius of the inner circle
+                const auto r = R/3;
+                if(t == R*R+1 || t <= r*r+1)
+                    w.put(left+i, top+j, 'o');
             }
         }
     }
-    auto newtonian_pull(Particle &p) {
+    auto newtonian_force(Particle &p) {
         // calculate the distance vector between the two center points
         // the magnitude
         Vector towards_blackhole = difference(this->p, p.p);
@@ -311,68 +348,85 @@ struct Blackhole {
         //    F = G*m0*m1/(r*r)
         // where F the gravitaion force, G is the gravitation constant, m0-m1 are the masses of the two objects, r is the distance between m0 and m1
         auto r = towards_blackhole.magnitude();
-        auto F = Constants::G*this->mass*Constants::solar_mass*p.mass/(r*r);
+
+        if(r < this->r/3) {
+            return null_vector;
+        }
+
+        auto F = Constants::G*mass_in_kg()*p.mass/(r*r);
         p.last_f = F;
         p.last_r = r*r;
         // we already have the direction of the force from the vector, now we just need to limit its force to F by setting its length
         towards_blackhole.magnitude(F);
+        p.fv = towards_blackhole;
         return towards_blackhole;
     }
+/*
+	auto angle_difference_force(Particle &p){
+        // same as above
+        Vector towards_blackhole = difference(this->p, p.p);
+        auto r = towards_blackhole.magnitude();
+        auto F = Constants::G*mass_in_kg()*p.mass/(r*r);
 
-	auto proper_pull(Particle &p){
-        /*// calculate distance vector
-		Vector dv = this->p;
-        dv.sub(p.p);
-        auto angle = dv.angle();
-		double distance = dv.magnitude();
-        double gravity = Constants::G*(this->mass*p.mass)/(distance*distance);
+        p.last_f = F;
 
-        //double delta_angle = gravity*(Constants::time_factor/Constants::c) * std::sin(p.angle - angle);
-        //delta_angle /= std::abs(1.-2.*Constants::G*this->mass/(distance*Constants::c*Constants::c));
-        //p.angle += delta_angle;
-        //p.angle += std::sin(p.angle - angle);
-
-        p.v.angle(angle);
-        p.v.magnitude(Constants::c);
-        
-        if(distance < this->r)
-            p.show = false;*/
-    }
+        auto angle = towards_blackhole.angle();
+        double delta_angle = -F*Constants::c*sin(p.last_r - angle);
+        delta_angle /= std::abs(1.-2.*Constants::G*mass_in_kg()/(r*Constants::c*Constants::c));
+        p.last_r += delta_angle;
+        towards_blackhole.angle(p.last_r + delta_angle);
+        return towards_blackhole;
+    }*/
 };
 
 // Declare it static, so we can exit() and still restore the terminal states
 static Screen s;
 
 
+auto handle_key(int c) {
+    switch(c) {
+        case 's': Context::step = !Context::step; return true;
+        case '<': Context::time_factor -= min(.1, Context::time_factor/2); return true;
+        case '>': Context::time_factor += min(.1, Context::time_factor*2); return true;
+    }
+    return false;
+}
+
 int main() {
 	Random r;
     Window w = s.get_window(s.xmax, s.ymax);
     auto [xm, ym] = w.get_max();
 
-	Blackhole b{Vector::from_screen({s.xmax/8, s.ymax/2}, Constants::scale), Constants::blackhole_mass};
+	Blackhole b{Vector::from_screen({s.xmax/5, s.ymax/3*2}, Constants::scale), Constants::blackhole_mass};
 
     vector<Particle> ps;
 
     const int height = s.ymax/2;
     for(int i = 0; i < height; ++i) {
-        ps.push_back({Vector::from_screen({s.xmax-int(r.get(10)), i}, Constants::scale), Constants::particle_velocity});
+        ps.push_back({Vector::from_screen({s.xmax-int(r.get(10)), i*2}, Constants::scale), Constants::particle_velocity});
     }
 
 	for(;;) {
         w.clear();
-        w.put(0, 0, "resolution: " + to_string(xm) + ":" + to_string(ym));
+        w.put(0, 0, "resolution: " + to_string(xm) + ":" + to_string(ym)+ ", time factor: " + to_string(Context::time_factor));
+        bool stat = true;
 		for(auto &p: ps) {
             // do not even calculate dead particles
             if(!p.show)
                 continue;
-			auto f = b.newtonian_pull(p);
+			//auto f = b.angle_difference_force(p);
+			auto f = b.newtonian_force(p);
             p.move(f);
-			p.draw(w);
+			p.draw(w, stat);
+            stat = false;
 		}
         b.draw(w);
 		w.refresh();
-        if(w.key_pressed())
-            w.wait_for_key();
-		this_thread::sleep_for(100ms);
-	}
+        auto c = w.key_pressed();
+        if(c || Context::step) {
+            while(handle_key(c.value_or(0)))
+                c = w.wait_for_key();
+        }
+        this_thread::sleep_for(10ms);
+    }
 }
